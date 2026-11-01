@@ -120,12 +120,37 @@ DATABASE_URL=postgres://... go run .           # serve on :8080 ($PORT respected
 go run . openapi > openapi.json                # then: npx openapi-typescript openapi.json
 ```
 
+Enums, uploads and non-JSON responses stay typed and documented:
+
+```go
+type Priority string
+
+func (Priority) EnumValues() []string { return []string{"low", "normal", "high"} } // enum in OpenAPI
+
+type AttachIn struct {
+	ID  int64 `path:"id"`
+	Req *http.Request // the body is left unread for the handler
+}
+
+type AttachmentForm struct {
+	File ekman.File `json:"file"` // documents a binary form field
+}
+
+ekman.Handle(r, "PUT /todos/{id}/attachment", ekman.SignedIn(), s.attach,
+	ekman.Accepts[AttachmentForm]("multipart/form-data"))
+r.Raw("GET /todos.csv", ekman.Public(), http.HandlerFunc(s.export),
+	ekman.Produces[string]("text/csv"))
+```
+
 A complete runnable app lives in [`examples/todo`](examples/todo).
 
 ## Features
 
 - **Typed handlers** — `Handle[In, Out]` binds `path:`, `query:` and `header:` tags plus a JSON
-  body, runs `Validate`, and encodes the result (200, 201 for POST, 204 for `NoContent`).
+  body, runs `Validate`, and encodes the result (200, 201 for POST, 204 for `NoContent`). An
+  `In` field of type `*http.Request` hands the unread body to the handler, e.g. for uploads.
+- **Enums** — a named string type with `EnumValues() []string` becomes a named `enum` schema
+  (a union in `openapi-typescript`), and other values are rejected on input.
 - **Access and RBAC** — `Public`/`SignedIn`/`Requires`, roles with an `rbac.All` wildcard, a
   baseline for every signed-in user, `Caller.RequireSelfOr(owner, perm)` for ownership checks.
 - **Boot validation** — duplicate modules or routes, undeclared permissions, sign-in routes
@@ -133,7 +158,8 @@ A complete runnable app lives in [`examples/todo`](examples/todo).
 - **Middleware stack** — request id, panic recovery, `slog` access log, credentialed CORS with
   a cross-origin write guard, sessions; plus app, group and per-route middleware.
 - **OpenAPI 3.1** — derived from routes and Go types, deterministic, served at
-  `{prefix}/openapi.json` and printed by `app openapi`.
+  `{prefix}/openapi.json` and printed by `app openapi`. `Accepts[T]`/`Produces[T]` document
+  CSV exports, downloads and multipart uploads; `Options.OpenAPIHook` adds anything else.
 - **Postgres** — `db.Q(ctx)` (sqlc-compatible), nested `db.Tx` that joins the outer
   transaction, `db.AfterCommit`, and forward-only per-module migrations with checksums under an
   advisory lock.
@@ -151,7 +177,8 @@ A complete runnable app lives in [`examples/todo`](examples/todo).
 
 ekman is **v0.x and experimental**. The contract lives in [`docs/design.md`](docs/design.md).
 
-Stable intent: `App`, `Module`, `Handle`, `Access`, `Caller`, `Error`, `Validation`, `db`, `rbac`.
+Stable intent: `App`, `Module`, `Handle`, `Access`, `Caller`, `Error`, `Validation`, `Enum`,
+`db`, `rbac`.
 
 Experimental APIs that may change before v1:
 
@@ -161,8 +188,9 @@ Experimental APIs that may change before v1:
 - `RouteInfo.Tags`
 - OpenAPI schema details
 - `ekmantest.DB`
+- `Accepts`/`Produces`/`Content`/`File` and `Options.OpenAPIHook`
 
-v0.1 targets PostgreSQL.
+ekman v0.x targets PostgreSQL. Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
