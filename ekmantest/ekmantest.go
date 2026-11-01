@@ -29,6 +29,7 @@ type Client struct {
 	srv *httptest.Server
 	app *ekman.App
 	id  *testhook.Identity
+	hdr http.Header
 }
 
 // New builds the app from opts and mods, validates it, and serves it until the test ends.
@@ -80,6 +81,18 @@ func (c *Client) Anonymous() *Client {
 	return &cp
 }
 
+// WithHeader returns a client whose requests carry the header too. It overrides the
+// Content-Type Do picks, e.g. for a multipart body.
+func (c *Client) WithHeader(key, value string) *Client {
+	cp := *c
+	cp.hdr = c.hdr.Clone()
+	if cp.hdr == nil {
+		cp.hdr = http.Header{}
+	}
+	cp.hdr.Add(key, value)
+	return &cp
+}
+
 // URL is the test server's base URL.
 func (c *Client) URL() string { return c.srv.URL }
 
@@ -114,6 +127,9 @@ func (c *Client) Do(method, path string, body any) *Response {
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	for k, vs := range c.hdr {
+		req.Header[k] = vs
 	}
 	if c.id != nil {
 		raw, _ := json.Marshal(c.id)

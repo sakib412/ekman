@@ -62,6 +62,13 @@ func TestClient(t *testing.T) {
 	if c.As("u1", manage).Anonymous().Do("POST", "/api/v1/notes", noteIn{"x"}).Status() != 401 {
 		t.Fatal("Anonymous must drop the identity")
 	}
+	plain := c.As("u1", manage).WithHeader("Content-Type", "text/plain")
+	if r := plain.Do("POST", "/api/v1/notes", noteIn{"x"}); r.Status() != 415 {
+		t.Fatalf("WithHeader must override Content-Type: %d %s", r.Status(), r.Body())
+	}
+	if r := c.As("u1", manage).Do("POST", "/api/v1/notes", noteIn{"x"}); r.Status() != 201 {
+		t.Fatalf("WithHeader must not change the original client: %d", r.Status())
+	}
 }
 
 func TestIdentityHeaderIsInertOnARealApp(t *testing.T) {
