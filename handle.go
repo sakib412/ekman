@@ -18,6 +18,10 @@ var noContentType = reflect.TypeFor[NoContent]()
 // tags; its other exported fields decode from the JSON body (except on GET and HEAD). If *In
 // implements Validator it runs before h. Out encodes as JSON with status 200, 201 for POST,
 // 204 for NoContent, or the Status option.
+//
+// An exported In field of type *http.Request receives the request itself, and the body is left
+// unread for the handler (e.g. a multipart upload through storage.Receive); In may then have no
+// JSON body fields. Document such a body with the Accepts option.
 func Handle[In, Out any](r *Router, pattern string, access Access, h func(ctx context.Context, c Caller, in *In) (Out, error), opts ...RouteOption) {
 	method, path, err := splitPattern(pattern, true)
 	if err != nil {
@@ -37,7 +41,7 @@ func Handle[In, Out any](r *Router, pattern string, access Access, h func(ctx co
 		}
 	}
 
-	info := &RouteInfo{In: inType, Out: outType}
+	info := &RouteInfo{In: inType, Out: outType, takesRequest: p.request != nil}
 	status := 0 // resolved after options apply
 	endpoint := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		in := new(In)

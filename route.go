@@ -18,8 +18,9 @@ type RouteInfo struct {
 	Status  int          // success status; 0 means the default (200, 201 for POST, 204 for NoContent)
 	In, Out reflect.Type // nil for Raw routes
 
-	mw     []Middleware
-	hidden bool // left out of the OpenAPI document
+	mw           []Middleware
+	hidden       bool // left out of the OpenAPI document
+	takesRequest bool // a Handle route whose In has a *http.Request field
 }
 
 // RouteOption adjusts a route at registration.
