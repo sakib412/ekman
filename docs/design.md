@@ -133,6 +133,9 @@ type Options struct {
 	CORS      []string          // allowed origins for credentialed requests; empty = same-origin only
 	Logger    *slog.Logger      // default JSON to stderr
 	Info      Info              // OpenAPI title/version/description
+	// OpenAPIHook edits the generated document once at boot (servers, x- extensions...), before
+	// it is served and returned by OpenAPI. doc is plain decoded JSON; an error fails the boot.
+	OpenAPIHook func(doc map[string]any) error
 }
 
 func New(opts Options) (*App, error)          // validates Options (prefix, CORS origins, auth config)
@@ -296,7 +299,7 @@ fields (`pkg.TypeBody`), `Enum` types as named string schemas with `enum` (and a
 on operations whose body holds one), a shared `Error` schema/response, Raw routes documented by
 `Accepts`/`Produces` (otherwise path wildcards and the status only), a `Permission` string enum
 of every declared permission, and a `session` cookie security scheme on SignedIn/Requires operations.
-Output is deterministic.
+Output is deterministic (as long as `OpenAPIHook` is).
 
 ## db
 

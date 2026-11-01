@@ -82,6 +82,20 @@ func (a *App) generateOpenAPI(routes []*route, reg *rbac.Registry) ([]byte, erro
 			"securitySchemes": obj{"session": obj{"type": "apiKey", "in": "cookie", "name": sessionCookie}},
 		},
 	}
+	if hook := a.opts.OpenAPIHook; hook != nil {
+		// Round-trip so the hook sees uniform JSON values rather than ekman's internal types.
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			return nil, err
+		}
+		doc = obj{}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return nil, err
+		}
+		if err := hook(doc); err != nil {
+			return nil, fmt.Errorf("OpenAPIHook: %w", err)
+		}
+	}
 	return json.MarshalIndent(doc, "", "  ")
 }
 
