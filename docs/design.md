@@ -193,6 +193,20 @@ func Summary(s string) RouteOption
 func Status(code int) RouteOption
 func Tag(t string) RouteOption           // free-form metadata app middleware reads
 func Use(mw ...Middleware) RouteOption   // per-route middleware
+// Accepts documents a request body the handler reads itself (Raw routes, and Handle routes whose
+// In has a *http.Request field; boot error elsewhere). Produces documents the success body a Raw
+// handler writes, at Status (default 200); boot error on Handle routes. Repeat per media type;
+// invalid or repeated media types and method-less Raw patterns fail at boot.
+func Accepts[T any](mediaType string) RouteOption // e.g. Accepts[AvatarForm]("multipart/form-data")
+func Produces[T any](mediaType string) RouteOption // e.g. Produces[string]("text/csv")
+
+type Content struct {
+	MediaType string
+	Type      reflect.Type // string → {"type":"string"}; File → binary; structs → object schema
+}
+// File stands for binary data in Accepts/Produces (a multipart file field, a download):
+// {"type":"string","format":"binary"}. Documentation only.
+type File struct{}
 
 type RouteInfo struct {
 	Method, Pattern, Module, Summary string // Pattern is the full path incl. APIPrefix
@@ -200,6 +214,7 @@ type RouteInfo struct {
 	Tags                            []string
 	Status                          int    // resolved success status (0 on Raw routes without Status)
 	In, Out                         reflect.Type // nil on Raw routes
+	Accepts, Produces               []Content    // from the Accepts/Produces options
 }
 func (ri RouteInfo) HasTag(t string) bool
 func RouteFrom(ctx context.Context) (RouteInfo, bool)
@@ -278,8 +293,9 @@ name, `x-ekman-access`), named structs as `components.schemas` keyed `pkg.Type`,
 nullable (`type: [T, "null"]` or `anyOf` with null), `time.Time` as `date-time`, json tags
 honored (`omitempty`/`omitzero` → optional, `,string`, `-`), request bodies exclude bound
 fields (`pkg.TypeBody`), `Enum` types as named string schemas with `enum` (and a 422 response
-on operations whose body holds one), a shared `Error` schema/response, a `Permission` string enum of every
-declared permission, and a `session` cookie security scheme on SignedIn/Requires operations.
+on operations whose body holds one), a shared `Error` schema/response, Raw routes documented by
+`Accepts`/`Produces` (otherwise path wildcards and the status only), a `Permission` string enum
+of every declared permission, and a `session` cookie security scheme on SignedIn/Requires operations.
 Output is deterministic.
 
 ## db

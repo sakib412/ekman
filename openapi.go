@@ -126,7 +126,14 @@ func (g *schemaGen) operation(rt *route, prefix string, opIDs map[string]int) (o
 		if status == 0 {
 			status = http.StatusOK
 		}
-		responses[strconv.Itoa(status)] = obj{"description": http.StatusText(status)}
+		resp := obj{"description": http.StatusText(status)}
+		if len(ri.Produces) > 0 {
+			resp["content"] = g.content(ri.Produces)
+		}
+		responses[strconv.Itoa(status)] = resp
+		if len(ri.Accepts) > 0 {
+			op["requestBody"] = obj{"required": true, "content": g.content(ri.Accepts)}
+		}
 	} else {
 		p, err := newPlan(ri.In)
 		if err != nil {
@@ -140,6 +147,9 @@ func (g *schemaGen) operation(rt *route, prefix string, opIDs map[string]int) (o
 		}
 		if len(p.params) > 0 {
 			responses["400"] = errRef()
+		}
+		if len(ri.Accepts) > 0 {
+			op["requestBody"] = obj{"required": true, "content": g.content(ri.Accepts)}
 		}
 		if p.hasBody && ri.Method != http.MethodGet && ri.Method != http.MethodHead {
 			op["requestBody"] = obj{
@@ -162,6 +172,15 @@ func (g *schemaGen) operation(rt *route, prefix string, opIDs map[string]int) (o
 	}
 	op["responses"] = responses
 	return op, nil
+}
+
+// content is an OpenAPI content map for bodies declared with Accepts or Produces.
+func (g *schemaGen) content(list []Content) obj {
+	out := obj{}
+	for _, c := range list {
+		out[c.MediaType] = obj{"schema": g.schema(c.Type)}
+	}
+	return out
 }
 
 // operationID derives a stable camelCase id: "GET /todos/{id}/done" → "getTodosByIdDone".
@@ -204,6 +223,8 @@ func (g *schemaGen) schema(t reflect.Type) obj {
 		return ref("Permission")
 	case rawJSONType:
 		return obj{}
+	case fileType:
+		return obj{"type": "string", "format": "binary"}
 	}
 	if values, ok := enumValues(t); ok {
 		return ref(g.defineEnum(t, values))

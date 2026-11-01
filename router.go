@@ -2,6 +2,7 @@ package ekman
 
 import (
 	"fmt"
+	"mime"
 	"net/http"
 	"slices"
 	"strings"
@@ -62,6 +63,7 @@ func (r *Router) add(method, path string, access Access, h http.Handler, info *R
 	for _, o := range opts {
 		o(info)
 	}
+	r.checkContent(info)
 	if access.kind == accessInvalid {
 		r.b.errorf("module %q: %s %s: access is required (ekman.Public, ekman.SignedIn or ekman.Requires)", r.module, method, info.Pattern)
 	}
@@ -71,6 +73,33 @@ func (r *Router) add(method, path string, access Access, h http.Handler, info *R
 		h:      h,
 		mw:     append(slices.Clone(r.mw), info.mw...),
 	})
+}
+
+// checkContent rejects Accepts and Produces options that would document nothing true.
+func (r *Router) checkContent(info *RouteInfo) {
+	where := fmt.Sprintf("module %q: %s %s", r.module, info.Method, info.Pattern)
+	if info.In != nil && len(info.Produces) > 0 {
+		r.b.errorf("%s: Produces is for Raw routes; Handle routes answer JSON from Out", where)
+	}
+	if info.In != nil && !info.takesRequest && len(info.Accepts) > 0 {
+		r.b.errorf("%s: Accepts needs a Raw route or an In with a *http.Request field; this route decodes JSON from In", where)
+	}
+	if info.Method == "" && len(info.Accepts)+len(info.Produces) > 0 {
+		r.b.errorf("%s: Accepts and Produces need a method in the pattern, as routes without one are not documented", where)
+	}
+	for _, list := range [][]Content{info.Accepts, info.Produces} {
+		seen := map[string]bool{}
+		for _, c := range list {
+			mt, _, err := mime.ParseMediaType(c.MediaType)
+			switch {
+			case err != nil || !strings.Contains(mt, "/"):
+				r.b.errorf("%s: invalid media type %q", where, c.MediaType)
+			case seen[c.MediaType]:
+				r.b.errorf("%s: media type %q documented twice", where, c.MediaType)
+			}
+			seen[c.MediaType] = true
+		}
+	}
 }
 
 func knownMethod(m string) bool {
