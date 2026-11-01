@@ -222,10 +222,7 @@ func (a *App) Routes() []RouteInfo {
 	}
 	out := make([]RouteInfo, len(b.routes))
 	for i, r := range b.routes {
-		ri := *r.info
-		ri.Tags = slices.Clone(ri.Tags)
-		ri.mw = nil
-		out[i] = ri
+		out[i] = r.info.clone()
 	}
 	return out
 }
