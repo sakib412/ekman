@@ -1,9 +1,10 @@
-# ekman design (v0.1 contract)
+# ekman design (v0.2 contract)
 
 ekman is an API-only, batteries-included Go framework. Like the Ekman spiral, each layer of
 an API is turned by the one above it: request → middleware → typed handler → database.
 
-This file is the contract for v0.1. Code implements it. When code needs to deviate, change this
+This file is the contract for v0.2 (changes since v0.1 are listed in `CHANGELOG.md`). Code
+implements it. When code needs to deviate, change this
 file in the same commit and say why.
 
 ## Principles
@@ -29,7 +30,7 @@ file in the same commit and say why.
    (e.g. `github.com/jackc/pgx/v5/stdlib`, driver name `"pgx"`) and ekman never does. OAuth 2
    (authorization code + PKCE) is implemented on `net/http`. Integration tests that need a real
    driver live in separate nested modules (`internal/dbtest`, `examples/todo`).
-10. **v0.1 targets PostgreSQL.** Migrations take a Postgres advisory lock and the bundled SQL
+10. **v0.x targets PostgreSQL.** Migrations take a Postgres advisory lock and the bundled SQL
     uses `$n` placeholders, `bytea` and `timestamptz`.
 
 ## Packages
@@ -449,6 +450,7 @@ func New(t testing.TB, opts ekman.Options, mods ...ekman.Module) *Client // http
 func (c *Client) As(userID string, perms ...rbac.Permission) *Client     // fake session (+ baseline; All works)
 func (c *Client) Anonymous() *Client
 func (c *Client) Do(method, path string, body any) *Response              // full path; non-[]byte/string/io.Reader bodies JSON-encoded
+func (c *Client) WithHeader(key, value string) *Client                     // copy whose requests add the header (overrides Do's Content-Type)
 func (c *Client) URL() string
 func (c *Client) App() *ekman.App
 func (r *Response) Status() int
@@ -467,5 +469,8 @@ ekmantest's header, so there is no production bypass.
 ## Experimental in v0.x
 
 `storage.Receive` policy shape, `mail.Brevo`, `auth.Directory` signature (account linking may
-change it), `auth.OAuth2Config`, `RouteInfo.Tags`, OpenAPI schema details, `ekmantest.DB`.
-Stable intent: `App`, `Module`, `Handle`, `Access`, `Caller`, `Error`, `Validation`, `db`, `rbac`.
+change it), `auth.OAuth2Config`, `RouteInfo.Tags`, OpenAPI schema details, `ekmantest.DB`,
+`Accepts`/`Produces`/`Content`/`File`, `Options.OpenAPIHook` (its `doc` shape follows the
+schema details).
+Stable intent: `App`, `Module`, `Handle` (including the `*http.Request` field), `Access`,
+`Caller`, `Error`, `Validation`, `Enum`, `db`, `rbac`.
