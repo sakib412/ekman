@@ -37,6 +37,11 @@ type Options struct {
 	CORS      []string          // allowed origins for credentialed requests; empty = same-origin only
 	Logger    *slog.Logger      // default JSON to stderr
 	Info      Info              // OpenAPI title/version
+
+	// OpenAPIHook edits the generated OpenAPI document once, at boot, before it is served or
+	// returned by App.OpenAPI: add servers, x- extensions, examples. doc is plain decoded JSON
+	// (map[string]any, []any, string, float64, bool); an error fails the boot.
+	OpenAPIHook func(doc map[string]any) error
 }
 
 // Info is the OpenAPI document's info object.

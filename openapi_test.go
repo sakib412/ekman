@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,5 +203,43 @@ func TestOperationID(t *testing.T) {
 		if got := operationID(in[0], in[1]); got != want {
 			t.Errorf("operationID(%v) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestOpenAPIHook(t *testing.T) {
+	hook := func(doc map[string]any) error {
+		doc["servers"] = []any{map[string]any{"url": "https://api.example.com"}}
+		// Values are plain decoded JSON, all the way down.
+		get := doc["paths"].(map[string]any)["/api/v1/todos"].(map[string]any)["get"].(map[string]any)
+		get["x-cache"] = "public"
+		_ = get["tags"].([]any)
+		return nil
+	}
+	a, h := newApp(t, Options{OpenAPIHook: hook}, Module{Name: "todo", Routes: func(r *Router) {
+		Handle(r, "GET /todos", Public(), func(context.Context, Caller, *struct{}) ([]Todo, error) { return nil, nil })
+	}})
+	raw, err := a.OpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := do(t, h, call{method: "GET", path: "/api/v1/openapi.json"}).Body.Bytes()
+	if !bytes.Equal(raw, served) {
+		t.Fatal("App.OpenAPI and /openapi.json differ")
+	}
+	var doc struct {
+		Servers []struct{ URL string }
+		Paths   map[string]map[string]map[string]any
+	}
+	_ = json.Unmarshal(raw, &doc)
+	if len(doc.Servers) != 1 || doc.Servers[0].URL != "https://api.example.com" || doc.Paths["/api/v1/todos"]["get"]["x-cache"] != "public" {
+		t.Fatalf("hook edits missing: %s", raw)
+	}
+
+	failing, err := New(Options{Logger: quietLogger(), OpenAPIHook: func(map[string]any) error { return errors.New("boom") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := failing.Handler(); err == nil || !strings.Contains(err.Error(), "OpenAPIHook: boom") {
+		t.Fatalf("err = %v", err)
 	}
 }
