@@ -3,6 +3,7 @@ package ekman
 import (
 	"encoding"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -39,6 +40,10 @@ func (a *App) generateOpenAPI(routes []*route, reg *rbac.Registry) ([]byte, erro
 			paths[p] = item
 		}
 		item[strings.ToLower(ri.Method)] = op
+	}
+
+	if len(g.errs) > 0 {
+		return nil, errors.Join(g.errs...)
 	}
 
 	perm := obj{"type": "string", "description": "A permission declared by a module."}
@@ -143,7 +148,7 @@ func (g *schemaGen) operation(rt *route, prefix string, opIDs map[string]int) (o
 			}
 			responses["400"] = errRef()
 		}
-		if reflect.PointerTo(ri.In).Implements(reflect.TypeFor[Validator]()) {
+		if reflect.PointerTo(ri.In).Implements(reflect.TypeFor[Validator]()) || (p.enums != nil && op["requestBody"] != nil) {
 			responses["422"] = errRef()
 		}
 		resp := obj{"description": http.StatusText(status)}
@@ -179,6 +184,7 @@ type schemaGen struct {
 	defs  obj
 	names map[reflect.Type]string
 	taken map[string]reflect.Type
+	errs  []error // schema problems found while generating (e.g. an empty Enum)
 }
 
 var (
@@ -198,6 +204,9 @@ func (g *schemaGen) schema(t reflect.Type) obj {
 		return ref("Permission")
 	case rawJSONType:
 		return obj{}
+	}
+	if values, ok := enumValues(t); ok {
+		return ref(g.defineEnum(t, values))
 	}
 	if t.Kind() == reflect.Pointer {
 		return nullable(g.schema(t.Elem()))
@@ -248,6 +257,16 @@ func (g *schemaGen) define(t reflect.Type, suffix string, skip map[string]bool) 
 			return name
 		}
 	}
+	name := g.claim(t, suffix)
+	if suffix == "" {
+		g.names[t] = name // before recursing, so self-referential types terminate
+	}
+	g.defs[name] = g.structSchema(t, skip)
+	return name
+}
+
+// claim reserves a components name for t: pkg.Type plus suffix, numbered on collisions.
+func (g *schemaGen) claim(t reflect.Type, suffix string) string {
 	base := typeName(t) + suffix
 	name := base
 	for i := 2; ; i++ {
@@ -257,10 +276,27 @@ func (g *schemaGen) define(t reflect.Type, suffix string, skip map[string]bool) 
 		name = base + "_" + strconv.Itoa(i)
 	}
 	g.taken[name] = t
-	if suffix == "" {
-		g.names[t] = name // before recursing, so self-referential types terminate
+	return name
+}
+
+// defineEnum registers an Enum type as a string schema with its values.
+func (g *schemaGen) defineEnum(t reflect.Type, values []string) string {
+	if name, ok := g.names[t]; ok {
+		return name
 	}
-	g.defs[name] = g.structSchema(t, skip)
+	name := g.claim(t, "")
+	g.names[t] = name
+	if len(values) == 0 {
+		g.errs = append(g.errs, fmt.Errorf("enum %s: EnumValues returned no values", t))
+	}
+	seen := map[string]bool{}
+	for _, v := range values {
+		if seen[v] {
+			g.errs = append(g.errs, fmt.Errorf("enum %s: value %q listed twice", t, v))
+		}
+		seen[v] = true
+	}
+	g.defs[name] = obj{"type": "string", "enum": values}
 	return name
 }
 
@@ -280,33 +316,17 @@ func typeName(t reflect.Type) string {
 func (g *schemaGen) structSchema(t reflect.Type, skip map[string]bool) obj {
 	props := obj{}
 	required := []string{}
-	for _, f := range reflect.VisibleFields(t) {
-		if skip[f.Name] || (!f.IsExported() && !f.Anonymous) {
-			continue
-		}
-		tag := f.Tag.Get("json")
-		name, opts, _ := strings.Cut(tag, ",")
-		if name == "-" && opts == "" {
-			continue
-		}
-		if f.Anonymous && name == "" && derefType(f.Type).Kind() == reflect.Struct {
-			continue // promoted fields are listed by VisibleFields
-		}
-		if !f.IsExported() {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
+	for _, f := range jsonFields(t, skip) {
+		_, opts, _ := strings.Cut(f.Tag.Get("json"), ",")
 		var s obj
 		if hasOpt(opts, "string") {
 			s = obj{"type": "string"}
 		} else {
 			s = g.schema(f.Type)
 		}
-		props[name] = s
+		props[f.Name] = s
 		if !hasOpt(opts, "omitempty") && !hasOpt(opts, "omitzero") {
-			required = append(required, name)
+			required = append(required, f.Name)
 		}
 	}
 	out := obj{"type": "object", "properties": props}
@@ -344,6 +364,9 @@ func (g *schemaGen) paramSchema(t reflect.Type) obj {
 	t = derefType(t)
 	if t.Kind() == reflect.Slice && !reflect.PointerTo(t).Implements(textUnmarshaler) {
 		return obj{"type": "array", "items": g.paramSchema(t.Elem())}
+	}
+	if _, ok := enumValues(t); ok {
+		return g.schema(t)
 	}
 	if t != timeType && reflect.PointerTo(t).Implements(textUnmarshaler) {
 		return obj{"type": "string"}
