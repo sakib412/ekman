@@ -164,6 +164,14 @@ func (r *Router) Raw(pattern string, access Access, h http.Handler, opts ...Rout
 // JSON body (not on GET/HEAD; at most 1 MiB; an empty body leaves them zero). If *In implements
 // Validator, it runs before h. Out encodes as JSON: 200, or 201 for POST, or 204 for NoContent,
 // or the Status option. A nil slice Out encodes as [].
+//
+// An exported In field of type *http.Request receives the request, and ekman leaves the body
+// unread for the handler (multipart uploads via storage.Receive, other non-JSON bodies). Such an
+// In has no JSON body fields (boot error otherwise: bind the rest from path/query/header or tag
+// them `json:"-"`), so the body is never consumed twice. Its body is undocumented unless the
+// route uses Accepts. Prefer this to Raw whenever the answer is JSON: params, Validate, Caller
+// and encoding stay typed. Use Raw when the handler writes the response itself (CSV,
+// streaming, redirects).
 func Handle[In, Out any](r *Router, pattern string, access Access, h func(ctx context.Context, c Caller, in *In) (Out, error), opts ...RouteOption)
 
 type Access struct{ /* unexported */ }
@@ -261,7 +269,8 @@ the document itself).
 Boot validation (`Handler`, `Main`, `Migrate`, `OpenAPI`; all errors reported together):
 duplicate or reserved module names, bad migration file names, migrations without `DB`, duplicate
 or conflicting routes, zero `Access`, unknown methods, path tags without a matching wildcard,
-unbindable field types, undeclared permissions in routes/roles/baseline, `Requires(rbac.All)`,
+unbindable field types, a `*http.Request` field next to JSON body fields (or twice, or tagged),
+undeclared permissions in routes/roles/baseline, `Requires(rbac.All)`,
 SignedIn/Requires routes without `Auth`, `Enum` types with no or duplicate values.
 
 OpenAPI: one operation per route (`operationId` like `getTodosById`, tagged with the module
@@ -411,7 +420,8 @@ type Policy struct{ MaxBytes int64; Types []string; Prefix string } // MaxBytes 
 // invalid_upload/missing_file/empty_file, 413 too_large, 415 unsupported_type.
 func Receive(r *http.Request, field string, b Bucket, p Policy) (Object, error)
 ```
-Use it from a `Router.Raw` handler (the request body must not be consumed by `Handle`).
+Use it from a `Handle` route whose `In` has a `*http.Request` field, or from a `Router.Raw`
+handler (the request body must not be consumed by JSON binding).
 
 ## ekmantest
 

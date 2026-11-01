@@ -14,7 +14,8 @@ import (
 	"strings"
 )
 
-// maxBodyBytes caps JSON request bodies. Uploads go through Raw routes and storage.Receive.
+// maxBodyBytes caps JSON request bodies. Uploads take the *http.Request (an In field or a Raw
+// route) and go through storage.Receive, which sets its own limit.
 const maxBodyBytes = 1 << 20
 
 type paramSource uint8
@@ -48,7 +49,10 @@ type plan struct {
 	params  []param
 	hasBody bool
 	enums   enumCheck // checks Enum values in the decoded body; nil when there are none
+	request []int     // index of the *http.Request field; nil when In has none
 }
+
+var requestType = reflect.TypeFor[*http.Request]()
 
 func newPlan(t reflect.Type) (*plan, error) {
 	p := &plan{}
@@ -63,6 +67,17 @@ func newPlan(t reflect.Type) (*plan, error) {
 			continue
 		}
 		src, name := paramTag(f)
+		if f.Type == requestType {
+			switch {
+			case src != 0:
+				errs = append(errs, fmt.Errorf("field %s: a *http.Request field cannot have a %s tag", f.Name, src))
+			case p.request != nil:
+				errs = append(errs, fmt.Errorf("field %s: only one *http.Request field is allowed", f.Name))
+			default:
+				p.request = f.Index
+			}
+			continue
+		}
 		if src == 0 {
 			if tag, _, _ := strings.Cut(f.Tag.Get("json"), ","); tag != "-" {
 				p.hasBody = true
@@ -82,6 +97,10 @@ func newPlan(t reflect.Type) (*plan, error) {
 		}
 		enum, _ := enumValues(paramBase(f.Type))
 		p.params = append(p.params, param{src: src, name: name, index: f.Index, field: f, enum: enum})
+	}
+	if p.request != nil && p.hasBody {
+		errs = append(errs, errors.New("a *http.Request field hands the body to the handler, so no other field may decode from it: "+
+			"bind the rest from path, query or header, or tag them `json:\"-\"`"))
 	}
 	if p.hasBody {
 		skip := map[string]bool{}
@@ -230,6 +249,9 @@ func fieldAlloc(v reflect.Value, index []int) reflect.Value {
 // bind fills in (a pointer to the input) from the request.
 func (p *plan) bind(r *http.Request, in any) error {
 	v := reflect.ValueOf(in).Elem()
+	if p.request != nil {
+		fieldAlloc(v, p.request).Set(reflect.ValueOf(r))
+	}
 	if p.hasBody && r.Method != http.MethodGet && r.Method != http.MethodHead {
 		if err := decodeBody(r, in); err != nil {
 			return err
