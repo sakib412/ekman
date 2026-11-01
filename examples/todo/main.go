@@ -1,7 +1,7 @@
 // Command todo is a runnable ekman example.
 //
 //	DATABASE_URL=postgres://... go run . migrate
-//	DATABASE_URL=postgres://... go run .            # serve on :8080
+//	DATABASE_URL=postgres://... go run .            # serve on :8080 (UPLOAD_DIR, UPLOAD_BASE_URL)
 //	go run . openapi > openapi.json
 package main
 
@@ -19,6 +19,7 @@ import (
 	"github.com/sakib412/ekman/db"
 	"github.com/sakib412/ekman/examples/todo/todo"
 	"github.com/sakib412/ekman/rbac"
+	"github.com/sakib412/ekman/storage"
 )
 
 func main() {
@@ -28,7 +29,12 @@ func main() {
 	}
 	defer database.Close()
 
-	todos := todo.New(database)
+	uploads := os.Getenv("UPLOAD_DIR")
+	if uploads == "" {
+		uploads = "uploads"
+	}
+	todos := todo.New(database, storage.Dir(uploads, os.Getenv("UPLOAD_BASE_URL")))
+	publicURL := os.Getenv("PUBLIC_URL")
 
 	app, err := ekman.New(ekman.Options{
 		DB:     database,
@@ -37,10 +43,17 @@ func main() {
 		Auth: &auth.Config{
 			Providers: providers(),
 			Directory: auth.DirectoryFunc(directory),
-			PublicURL: os.Getenv("PUBLIC_URL"),
+			PublicURL: publicURL,
 		},
 		CORS: nonEmpty(strings.Split(os.Getenv("CORS_ORIGINS"), ",")),
-		Info: ekman.Info{Title: "Todo API", Version: "0.1.0"},
+		Info: ekman.Info{Title: "Todo API", Version: "0.2.0"},
+		// Anything ekman does not derive can be added to the document here.
+		OpenAPIHook: func(doc map[string]any) error {
+			if publicURL != "" {
+				doc["servers"] = []any{map[string]any{"url": publicURL}}
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		log.Fatal(err)
