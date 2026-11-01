@@ -198,6 +198,13 @@ func RouteFrom(ctx context.Context) (RouteInfo, bool)
 
 type NoContent struct{}
 
+// Enum is implemented by named string types with a fixed value set (kind, status, tier...).
+// Each is a components schema pkg.Type with `enum`, so openapi-typescript emits a union.
+// Handle rejects other values: 400 invalid_param for path/query/header parameters, 422
+// invalid_input for JSON body fields at any depth (field keys like "items[0].kind"), merged
+// with Validate's messages. "" passes, like OneOf. EnumValues is called once, at boot.
+type Enum interface{ EnumValues() []string }
+
 type Validator interface{ Validate(v *Validation) }
 type Validation struct{ /* field -> message; first message per field wins */ }
 func (v *Validation) Check(ok bool, field, msg string)
@@ -255,13 +262,14 @@ Boot validation (`Handler`, `Main`, `Migrate`, `OpenAPI`; all errors reported to
 duplicate or reserved module names, bad migration file names, migrations without `DB`, duplicate
 or conflicting routes, zero `Access`, unknown methods, path tags without a matching wildcard,
 unbindable field types, undeclared permissions in routes/roles/baseline, `Requires(rbac.All)`,
-SignedIn/Requires routes without `Auth`.
+SignedIn/Requires routes without `Auth`, `Enum` types with no or duplicate values.
 
 OpenAPI: one operation per route (`operationId` like `getTodosById`, tagged with the module
 name, `x-ekman-access`), named structs as `components.schemas` keyed `pkg.Type`, pointers
 nullable (`type: [T, "null"]` or `anyOf` with null), `time.Time` as `date-time`, json tags
 honored (`omitempty`/`omitzero` → optional, `,string`, `-`), request bodies exclude bound
-fields (`pkg.TypeBody`), a shared `Error` schema/response, a `Permission` string enum of every
+fields (`pkg.TypeBody`), `Enum` types as named string schemas with `enum` (and a 422 response
+on operations whose body holds one), a shared `Error` schema/response, a `Permission` string enum of every
 declared permission, and a `session` cookie security scheme on SignedIn/Requires operations.
 Output is deterministic.
 

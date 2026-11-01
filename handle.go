@@ -45,13 +45,14 @@ func Handle[In, Out any](r *Router, pattern string, access Access, h func(ctx co
 			WriteError(w, req, err)
 			return
 		}
+		var val Validation
+		p.checkEnums(in, &val)
 		if v, ok := any(in).(Validator); ok {
-			var val Validation
 			v.Validate(&val)
-			if err := val.Err(); err != nil {
-				WriteError(w, req, err)
-				return
-			}
+		}
+		if err := val.Err(); err != nil {
+			WriteError(w, req, err)
+			return
 		}
 		ctx := req.Context()
 		out, err := h(ctx, CallerFrom(ctx), in)

@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -39,18 +40,21 @@ type param struct {
 	name  string
 	index []int
 	field reflect.StructField
+	enum  []string // allowed values when the field's base type is an Enum
 }
 
 // plan is the reflection done once per route: which fields bind from where.
 type plan struct {
 	params  []param
 	hasBody bool
+	enums   enumCheck // checks Enum values in the decoded body; nil when there are none
 }
 
 func newPlan(t reflect.Type) (*plan, error) {
 	p := &plan{}
 	if t.Kind() != reflect.Struct {
 		p.hasBody = true
+		p.enums = newEnumCompiler().compile(t)
 		return p, nil
 	}
 	var errs []error
@@ -76,9 +80,52 @@ func newPlan(t reflect.Type) (*plan, error) {
 		if src == inHeader {
 			name = http.CanonicalHeaderKey(name)
 		}
-		p.params = append(p.params, param{src: src, name: name, index: f.Index, field: f})
+		enum, _ := enumValues(paramBase(f.Type))
+		p.params = append(p.params, param{src: src, name: name, index: f.Index, field: f, enum: enum})
+	}
+	if p.hasBody {
+		skip := map[string]bool{}
+		for _, prm := range p.params {
+			skip[prm.field.Name] = true
+		}
+		if reaches(t, map[reflect.Type]bool{}) {
+			p.enums = newEnumCompiler().build(t, skip)
+		}
 	}
 	return p, errors.Join(errs...)
+}
+
+// paramBase is the scalar type a parameter field parses into: T for T, *T, []T and []*T.
+func paramBase(t reflect.Type) reflect.Type {
+	t = derefType(t)
+	if t.Kind() == reflect.Slice && !reflect.PointerTo(t).Implements(textUnmarshaler) {
+		t = derefType(t.Elem())
+	}
+	return t
+}
+
+// enumOK reports whether every string in v (a bound parameter field) is allowed.
+func enumOK(v reflect.Value, allowed []string) bool {
+	switch v.Kind() {
+	case reflect.Pointer:
+		return v.IsNil() || enumOK(v.Elem(), allowed)
+	case reflect.Slice:
+		for i := range v.Len() {
+			if !enumOK(v.Index(i), allowed) {
+				return false
+			}
+		}
+		return true
+	}
+	s := v.String()
+	return s == "" || slices.Contains(allowed, s)
+}
+
+// checkEnums records body fields holding values outside their Enum in val.
+func (p *plan) checkEnums(in any, val *Validation) {
+	if p.enums != nil {
+		p.enums(reflect.ValueOf(in).Elem(), "", val)
+	}
 }
 
 func paramTag(f reflect.StructField) (paramSource, string) {
@@ -218,16 +265,23 @@ func (p *plan) bind(r *http.Request, in any) error {
 		}
 		if f.Kind() == reflect.Slice && !reflect.PointerTo(f.Type()).Implements(textUnmarshaler) {
 			s := reflect.MakeSlice(f.Type(), len(vals), len(vals))
+			ok := true
 			for i, raw := range vals {
 				if err := setText(s.Index(i), raw); err != nil {
 					fail(prm.name, err.Error())
+					ok = false
 				}
 			}
 			f.Set(s)
+			if ok && prm.enum != nil && !enumOK(f, prm.enum) {
+				fail(prm.name, enumMessage(prm.enum))
+			}
 			continue
 		}
 		if err := setText(f, vals[0]); err != nil {
 			fail(prm.name, err.Error())
+		} else if prm.enum != nil && !enumOK(f, prm.enum) {
+			fail(prm.name, enumMessage(prm.enum))
 		}
 	}
 	if fields != nil {
