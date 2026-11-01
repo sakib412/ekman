@@ -27,6 +27,7 @@ type Todo struct {
 	Raw       json.RawMessage   `json:"raw,omitempty"`
 	Extra     map[string]Person `json:"extra,omitempty"`
 	Embedded
+	//lint:ignore U1000 present to check that unexported fields stay out of the schema
 	unexported int
 }
 
